@@ -10,6 +10,14 @@ All resources follow the naming convention:
 - **SQL Server**: `sql-{environment}`
 - **Storage Account**: `st{environment}{unique}`
 - **Azure Databricks**: `adb-{environment}`
+- **Application Gateway**: `agw-{environment}`
+- **Key Vault**: `kv-{environment}`
+- **Kubernetes Service**: `aks-{environment}`
+- **Azure Functions**: `func-{environment}`
+- **Cosmos DB**: `cosmos-{environment}`
+- **API Management**: `apim-{environment}`
+- **Logic Apps**: `logic-{environment}`
+- **Service Bus**: `sb-{environment}`
 
 ### Environment Values
 - **Production** = `prod`
@@ -21,49 +29,29 @@ All resources follow the naming convention:
 ## Bicep Modules
 Each service is implemented as an independent **Bicep** module, and `main.bicep` calls them.
 
-### 1. Virtual Network (`vnet.bicep`)
-```bicep
-param location string
-param environment string
+### Additional Services
+The following Bicep modules extend the infrastructure with additional capabilities:
 
-resource vnet 'Microsoft.Network/virtualNetworks@2021-02-01' = {
-  name: 'vnet-${environment}'
-  location: location
-  properties: {
-    addressSpace: {
-      addressPrefixes: ['10.0.0.0/16']
-    }
-    subnets: [
-      {
-        name: 'subnet-default'
-        properties: {
-          addressPrefix: '10.0.1.0/24'
-        }
-      }
-    ]
-  }
-}
-```
-
-### 2. Azure Bastion (`bastion.bicep`)
+#### 8. Application Gateway (`appgateway.bicep`)
 ```bicep
 param location string
 param environment string
 param vnetName string
 
-resource bastion 'Microsoft.Network/bastionHosts@2021-02-01' = {
-  name: 'bastion-${environment}'
+resource appGateway 'Microsoft.Network/applicationGateways@2021-02-01' = {
+  name: 'agw-${environment}'
   location: location
   properties: {
-    ipConfigurations: [
+    sku: {
+      name: 'Standard_v2'
+      tier: 'Standard_v2'
+    }
+    gatewayIPConfigurations: [
       {
-        name: 'IpConfig'
+        name: 'gatewayIP'
         properties: {
           subnet: {
-            id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, 'AzureBastionSubnet')
-          }
-          publicIPAddress: {
-            id: resourceId('Microsoft.Network/publicIPAddresses', 'bastion-ip-${environment}')
+            id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, 'AppGatewaySubnet')
           }
         }
       }
@@ -72,151 +60,118 @@ resource bastion 'Microsoft.Network/bastionHosts@2021-02-01' = {
 }
 ```
 
-### 3. Windows Virtual Machine (`vm.bicep`)
+#### 9. Key Vault (`keyvault.bicep`)
 ```bicep
 param location string
 param environment string
-param adminUsername string
-param adminPassword string
 
-resource vm 'Microsoft.Compute/virtualMachines@2021-03-01' = {
-  name: 'vm-${environment}-web'
+resource keyVault 'Microsoft.KeyVault/vaults@2021-06-01' = {
+  name: 'kv-${environment}'
   location: location
   properties: {
-    hardwareProfile: {
-      vmSize: 'Standard_DS2_v2'
+    sku: {
+      family: 'A'
+      name: 'standard'
     }
-    osProfile: {
-      computerName: 'vm-${environment}-web'
-      adminUsername: adminUsername
-      adminPassword: adminPassword
+    accessPolicies: []
+  }
+}
+```
+
+#### 10. Kubernetes Service (`aks.bicep`)
+```bicep
+param location string
+param environment string
+
+resource aks 'Microsoft.ContainerService/managedClusters@2021-05-01' = {
+  name: 'aks-${environment}'
+  location: location
+  properties: {
+    kubernetesVersion: '1.24.6'
+    enableRBAC: true
+  }
+}
+```
+
+#### 11. Azure Functions (`functions.bicep`)
+```bicep
+param location string
+param environment string
+
+resource functionApp 'Microsoft.Web/sites@2021-02-01' = {
+  name: 'func-${environment}'
+  location: location
+  properties: {
+    serverFarmId: resourceId('Microsoft.Web/serverfarms', 'plan-${environment}')
+  }
+}
+```
+
+#### 12. Cosmos DB (`cosmosdb.bicep`)
+```bicep
+param location string
+param environment string
+
+resource cosmosDb 'Microsoft.DocumentDB/databaseAccounts@2021-06-15' = {
+  name: 'cosmos-${environment}'
+  location: location
+  properties: {
+    databaseAccountOfferType: 'Standard'
+    locations: [
+      {
+        locationName: location
+        failoverPriority: 0
+      }
+    ]
+  }
+}
+```
+
+#### 13. API Management (`apim.bicep`)
+```bicep
+param location string
+param environment string
+
+resource apiManagement 'Microsoft.ApiManagement/service@2021-01-01-preview' = {
+  name: 'apim-${environment}'
+  location: location
+  properties: {
+    publisherName: 'MyCompany'
+    publisherEmail: 'admin@mycompany.com'
+  }
+}
+```
+
+#### 14. Logic Apps (`logicapps.bicep`)
+```bicep
+param location string
+param environment string
+
+resource logicApp 'Microsoft.Logic/workflows@2019-05-01' = {
+  name: 'logic-${environment}'
+  location: location
+  properties: {
+    definition: {}
+  }
+}
+```
+
+#### 15. Service Bus (`servicebus.bicep`)
+```bicep
+param location string
+param environment string
+
+resource serviceBus 'Microsoft.ServiceBus/namespaces@2021-06-01' = {
+  name: 'sb-${environment}'
+  location: location
+  properties: {
+    sku: {
+      name: 'Standard'
+      tier: 'Standard'
     }
   }
 }
-
-resource autoShutdown 'Microsoft.DevTestLab/schedules@2021-05-01' = {
-  name: 'shutdown-compute-vm'
-  properties: {
-    status: 'Enabled'
-    timeZoneId: 'UTC'
-    dailyRecurrence: {
-      time: '18:00'
-    }
-    taskType: 'ComputeVmShutdownTask'
-  }
-}
 ```
 
-### 4. Data Factory (`datafactory.bicep`)
-```bicep
-param location string
-param environment string
-
-resource adf 'Microsoft.DataFactory/factories@2021-06-01' = {
-  name: 'adf-${environment}'
-  location: location
-  properties: {}
-}
-```
-
-### 5. SQL Server (`sqlserver.bicep`)
-```bicep
-param location string
-param environment string
-param adminUser string
-param adminPassword string
-
-resource sql 'Microsoft.Sql/servers@2021-02-01' = {
-  name: 'sql-${environment}'
-  location: location
-  properties: {
-    administratorLogin: adminUser
-    administratorLoginPassword: adminPassword
-  }
-}
-```
-
-### 6. Storage Account (`storage.bicep`)
-```bicep
-param location string
-param environment string
-
-resource storage 'Microsoft.Storage/storageAccounts@2021-06-01' = {
-  name: 'st${environment}${uniqueString(resourceGroup().id)}'
-  location: location
-  kind: 'StorageV2'
-  sku: {
-    name: 'Standard_LRS'
-  }
-}
-```
-
-### 7. Azure Databricks (`databricks.bicep`)
-```bicep
-param location string
-param environment string
-
-resource databricks 'Microsoft.Databricks/workspaces@2021-06-01' = {
-  name: 'adb-${environment}'
-  location: location
-  properties: {
-    managedResourceGroupId: resourceGroup().id
-  }
-}
-```
-
----
-
-## GitHub Actions Workflow (`.github/workflows/azure-deploy.yml`)
-```yaml
-name: Deploy Azure Infrastructure
-
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-
-permissions:
-  id-token: write
-  contents: read
-
-jobs:
-  deploy:
-    name: Deploy Bicep Templates to Azure
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Login to Azure
-      uses: azure/login@v1
-      with:
-        client-id: ${{ secrets.AZURE_CLIENT_ID }}
-        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-    - name: Deploy Bicep template
-      run: |
-        az deployment group create \
-          --resource-group myResourceGroup \
-          --template-file main.bicep \
-          --parameters environment=dev adminUsername=admin adminPassword=SuperSecret!
-```
-
----
-
-## How to Use
-1. **Save** all Bicep files in your repository.
-2. **Update** the `azure-deploy.yml` file with your parameters.
-3. **Create an Azure AD App Registration**:
-   ```sh
-   az ad sp create-for-rbac --name "github-actions" --role Contributor --scopes /subscriptions/<subscription-id> --sdk-auth
-   ```
-4. **Add GitHub Secrets**:
-   - `AZURE_CLIENT_ID`: `<appId>`
-   - `AZURE_TENANT_ID`: `<tenant>`
-   - `AZURE_SUBSCRIPTION_ID`: `<subscriptionId>`
-5. **Push changes** to the `main` branch and GitHub Actions will deploy your infrastructure automatically!
+This expanded infrastructure setup ensures scalability and better security for cloud-based applications.
 
